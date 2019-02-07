@@ -1,0 +1,6 @@
+apiVersion: wordpress.autimo.com/v1alpha1
+kind: Wordpress
+metadata:
+  name: example-wordpress
+spec:
+  version: "5"

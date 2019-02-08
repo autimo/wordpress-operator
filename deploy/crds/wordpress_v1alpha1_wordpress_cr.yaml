@@ -3,7 +3,7 @@ kind: Wordpress
 metadata:
   name: example-wordpress
 spec:
-  wordpress-version: "5-php7.3"
+  wordpress-version: "5-php7.2"
   port: 80
   size: 2
   mysql-version: "5.7"

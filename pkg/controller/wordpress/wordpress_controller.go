@@ -223,7 +223,7 @@ func newServiceForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Service {
       },
       Selector:        labels,
       SessionAffinity: corev1.ServiceAffinityNone,
-      Type:            corev1.ServiceTypeNodePort,
+      Type:            corev1.ServiceTypeLoadBalancer,
     },
   }
 }
@@ -308,7 +308,7 @@ func newDBServiceForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Service {
       },
       Selector:        labels,
       SessionAffinity: corev1.ServiceAffinityNone,
-      Type:            corev1.ServiceTypeNodePort,
+      Type:            corev1.ServiceTypeClusterIP,
     },
   }
 }

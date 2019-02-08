@@ -110,34 +110,24 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  // Check if this Pod already exists
-  foundSvc := &corev1.Service{}
-  err = r.client.Get(context.TODO(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, foundSvc)
-  if err != nil && errors.IsNotFound(err) {
-    reqLogger.Info("Creating a new Service", "Service.Namespace", service.Namespace, "Pod.Name", service.Name)
-    err = r.client.Create(context.TODO(), service)
-    if err != nil {
-      return reconcile.Result{}, err
-    }
-
-    // Service created successfully - don't requeue
-  } else if err != nil {
+  err = updateOrCreateService(r, instance, service)
+  if err != nil {
     return reconcile.Result{}, err
-  } else {
-
-    // Service already exists - update
-    service = newServiceForCRUpdate(instance, foundSvc)
-
-    // Set Wordpress instance as the owner and controller
-    if err = controllerutil.SetControllerReference(instance, service, r.scheme); err != nil {
-      return reconcile.Result{}, err
-    }
-    reqLogger.Info("Updating Service", "Service.Namespace", foundSvc.Namespace, "Service.Name", foundSvc.Name)
-    err = r.client.Update(context.TODO(), service)
-    if err != nil {
-      return reconcile.Result{}, err
-    }
   }
+
+  // Define a new DB Service object
+  service = newDBServiceForCR(instance)
+
+  // Set Wordpress instance as the owner and controller
+  if err = controllerutil.SetControllerReference(instance, service, r.scheme); err != nil {
+    return reconcile.Result{}, err
+  }
+
+  err = updateOrCreateService(r, instance, service)
+  if err != nil {
+    return reconcile.Result{}, err
+  }
+
   // Define a new Pod object
   deploy := newDeployForCR(instance)
 
@@ -146,29 +136,79 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  // Check if this Deployment already exists
-  foundDep := &appsv1.Deployment{}
-  err = r.client.Get(context.TODO(), types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, foundDep)
-  if err != nil && errors.IsNotFound(err) {
-    reqLogger.Info("Creating a new Deployment", "Deployment.Namespace", deploy.Namespace, "Deployment.Name", deploy.Name)
-    err = r.client.Create(context.TODO(), deploy)
-    if err != nil {
-      return reconcile.Result{}, err
-    }
-
-    // Deployment created successfully - don't requeue
-    return reconcile.Result{}, nil
-  } else if err != nil {
+  err = updateOrCreateDeployment(r, instance, deploy)
+  if err != nil {
     return reconcile.Result{}, err
   }
 
-  // Deployment already exists - update
-  reqLogger.Info("Updating Deployment", "Deployment.Namespace", foundDep.Namespace, "Deployment.Name", foundDep.Name)
-  err = r.client.Update(context.TODO(), deploy)
+  // Define a new DB Deployment object
+  deploy = newDBDeployForCR(instance)
+
+  // Set instance as the owner and controller
+  if err = controllerutil.SetControllerReference(instance, deploy, r.scheme); err != nil {
+    return reconcile.Result{}, err
+  }
+
+  err = updateOrCreateDeployment(r, instance, deploy)
   if err != nil {
     return reconcile.Result{}, err
   }
   return reconcile.Result{}, nil
+}
+
+func updateOrCreateService(r *ReconcileWordpress, instance *wordpressv1alpha1.Wordpress, service *corev1.Service) error {
+  reqLogger := log.WithValues("Service.Namespace", service.Namespace, "Service.Name", service.Name)
+  // Check if this Pod already exists
+  found := &corev1.Service{}
+  err := r.client.Get(context.TODO(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, found)
+  if err != nil && errors.IsNotFound(err) {
+    reqLogger.Info("Creating a new Service", "Service.Namespace", service.Namespace, "Service.Name", service.Name)
+    err = r.client.Create(context.TODO(), service)
+    if err != nil {
+      return err
+    }
+
+    // Service created successfully - don't requeue
+  } else if err != nil {
+    return err
+  } else {
+
+    // Service already exists - update
+    service.ObjectMeta.ResourceVersion = found.ObjectMeta.ResourceVersion
+    service.Spec.ClusterIP = found.Spec.ClusterIP
+    reqLogger.Info("Updating Service", "Service.Namespace", found.Namespace, "Service.Name", found.Name)
+    err = r.client.Update(context.TODO(), service)
+    if err != nil {
+      return err
+    }
+  }
+  return nil
+}
+
+func updateOrCreateDeployment(r *ReconcileWordpress, instance *wordpressv1alpha1.Wordpress, deploy *appsv1.Deployment) error {
+  reqLogger := log.WithValues("Deployment.Namespace", deploy.Namespace, "Deployment.Name", deploy.Name)
+
+  // Check if this Deployment already exists
+  found := &appsv1.Deployment{}
+  err := r.client.Get(context.TODO(), types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, found)
+  if err != nil && errors.IsNotFound(err) {
+    reqLogger.Info("Creating a new Deployment", "Deployment.Namespace", deploy.Namespace, "Deployment.Name", deploy.Name)
+    err = r.client.Create(context.TODO(), deploy)
+    if err != nil {
+      return err
+    }
+  } else if err != nil {
+    return err
+  } else {
+    // Deployment already exists - update
+    deploy.ObjectMeta.ResourceVersion = found.ObjectMeta.ResourceVersion
+    reqLogger.Info("Updating Deployment", "Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
+    err = r.client.Update(context.TODO(), deploy)
+    if err != nil {
+      return err
+    }
+  }
+  return nil
 }
 
 // newDeployForCR returns a wordpress service with the same name/namespace as the cr
@@ -196,39 +236,13 @@ func newServiceForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Service {
   }
 }
 
-func newServiceForCRUpdate(cr *wordpressv1alpha1.Wordpress, foundSvc *corev1.Service) *corev1.Service {
-  labels := map[string]string{
-    "app": cr.Name,
-  }
-
-  port := cr.Spec.Port
-
-  return &corev1.Service{
-    ObjectMeta: metav1.ObjectMeta{
-      Name:            cr.Name,
-      Namespace:       cr.Namespace,
-      Labels:          labels,
-      ResourceVersion: foundSvc.ObjectMeta.ResourceVersion,
-    },
-    Spec: corev1.ServiceSpec{
-      Ports: []corev1.ServicePort{
-        {Name: "http", Port: port, Protocol: "TCP", TargetPort: intstr.FromInt(80)},
-      },
-      Selector:        labels,
-      SessionAffinity: corev1.ServiceAffinityNone,
-      Type:            foundSvc.Spec.Type,
-      ClusterIP:       foundSvc.Spec.ClusterIP,
-    },
-  }
-}
-
 // newDeployForCR returns a wordpress deployment with the same name/namespace as the cr
 func newDeployForCR(cr *wordpressv1alpha1.Wordpress) *appsv1.Deployment {
   labels := map[string]string{
     "app": cr.Name,
   }
 
-  version := cr.Spec.Version
+  version := cr.Spec.WordpressVersion
   replicas := cr.Spec.Size
 
   return &appsv1.Deployment{
@@ -258,6 +272,110 @@ func newDeployForCR(cr *wordpressv1alpha1.Wordpress) *appsv1.Deployment {
                 ContainerPort: 80,
                 Name:          "wordpress-http",
               }},
+              Env: []corev1.EnvVar{
+                {
+                  Name:  "WORDPRESS_DB_HOST",
+                  Value: cr.Name + "-db",
+                },
+                {
+                  Name:  "WORDPRESS_DB_PASSWORD",
+                  Value: cr.Spec.DBPassword,
+                },
+                {
+                  Name:  "WORDPRESS_DB_USER",
+                  Value: cr.Spec.DBUsername,
+                },
+                {
+                  Name:  "WORDPRESS_DB_NAME",
+                  Value: cr.Spec.DBName,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+}
+
+// newDeployForCR returns a wordpress service with the same name/namespace as the cr
+func newDBServiceForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Service {
+  labels := map[string]string{
+    "app": cr.Name + "-db",
+  }
+
+  return &corev1.Service{
+    ObjectMeta: metav1.ObjectMeta{
+      Name:      cr.Name + "-db",
+      Namespace: cr.Namespace,
+      Labels:    labels,
+    },
+    Spec: corev1.ServiceSpec{
+      Ports: []corev1.ServicePort{
+        {Name: "http", Port: 3306, Protocol: "TCP", TargetPort: intstr.FromInt(3306)},
+      },
+      Selector:        labels,
+      SessionAffinity: corev1.ServiceAffinityNone,
+      Type:            corev1.ServiceTypeNodePort,
+    },
+  }
+}
+
+// newDBDeployForCR returns a mysql deployment with the same name/namespace as the cr
+func newDBDeployForCR(cr *wordpressv1alpha1.Wordpress) *appsv1.Deployment {
+  labels := map[string]string{
+    "app": cr.Name + "-db",
+  }
+
+  version := cr.Spec.MysqlVersion
+  var replicas int32
+  replicas = 1
+
+  return &appsv1.Deployment{
+    TypeMeta: metav1.TypeMeta{
+      APIVersion: "apps/v1",
+      Kind:       "Deployment",
+    },
+    ObjectMeta: metav1.ObjectMeta{
+      Name:      cr.Name + "-db",
+      Namespace: cr.Namespace,
+    },
+    Spec: appsv1.DeploymentSpec{
+      Replicas: &replicas,
+      Selector: &metav1.LabelSelector{
+        MatchLabels: labels,
+      },
+      Template: corev1.PodTemplateSpec{
+        ObjectMeta: metav1.ObjectMeta{
+          Labels: labels,
+        },
+        Spec: corev1.PodSpec{
+          Containers: []corev1.Container{
+            {
+              Name:  "wordpress-db",
+              Image: "mysql:" + version,
+              Ports: []corev1.ContainerPort{{
+                ContainerPort: 3306,
+                Name:          "mysql",
+              }},
+              Env: []corev1.EnvVar{
+                {
+                  Name:  "MYSQL_ROOT_PASSWORD",
+                  Value: cr.Spec.DBPassword,
+                },
+                {
+                  Name:  "MYSQL_PASSWORD",
+                  Value: cr.Spec.DBPassword,
+                },
+                {
+                  Name:  "MYSQL_USER",
+                  Value: cr.Spec.DBUsername,
+                },
+                {
+                  Name:  "MYSQL_DATABASE",
+                  Value: cr.Spec.DBName,
+                },
+              },
             },
           },
         },

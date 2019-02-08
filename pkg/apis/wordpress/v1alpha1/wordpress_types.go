@@ -13,9 +13,13 @@ type WordpressSpec struct {
   // INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
   // Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
   // Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
-  Version string `json:"version"`
-  Port    int32  `json:"port"`
-  Size    int32  `json:"size"`
+  WordpressVersion string `json:"wordpress-version"`
+  Port             int32  `json:"port"`
+  Size             int32  `json:"size"`
+  MysqlVersion     string `json:"mysql-version"`
+  DBName           string `json:"db-name"`
+  DBUsername       string `json:"db-username"`
+  DBPassword       string `json:"db-password"`
 }
 
 // WordpressStatus defines the observed state of Wordpress

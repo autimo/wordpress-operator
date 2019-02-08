@@ -14,6 +14,8 @@ type WordpressSpec struct {
   // Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
   // Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html
   Version string `json:"version"`
+  Port    int32  `json:"port"`
+  Size    int32  `json:"size"`
 }
 
 // WordpressStatus defines the observed state of Wordpress

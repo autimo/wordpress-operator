@@ -5,11 +5,13 @@ import (
 
   wordpressv1alpha1 "github.com/autimo/wordpress-operator/pkg/apis/wordpress/v1alpha1"
 
+  appsv1 "k8s.io/api/apps/v1"
   corev1 "k8s.io/api/core/v1"
   "k8s.io/apimachinery/pkg/api/errors"
   metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
   "k8s.io/apimachinery/pkg/runtime"
   "k8s.io/apimachinery/pkg/types"
+  "k8s.io/apimachinery/pkg/util/intstr"
   "sigs.k8s.io/controller-runtime/pkg/client"
   "sigs.k8s.io/controller-runtime/pkg/controller"
   "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -100,58 +102,124 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  // Define a new Pod object
-  pod := newPodForCR(instance)
+  // Define a new Service object
+  service := newServiceForCR(instance)
 
   // Set Wordpress instance as the owner and controller
-  if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
+  if err = controllerutil.SetControllerReference(instance, service, r.scheme); err != nil {
     return reconcile.Result{}, err
   }
 
   // Check if this Pod already exists
-  found := &corev1.Pod{}
-  err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
+  foundSvc := &corev1.Service{}
+  err = r.client.Get(context.TODO(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, foundSvc)
   if err != nil && errors.IsNotFound(err) {
-    reqLogger.Info("Creating a new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
-    err = r.client.Create(context.TODO(), pod)
+    reqLogger.Info("Creating a new Service", "Service.Namespace", service.Namespace, "Pod.Name", service.Name)
+    err = r.client.Create(context.TODO(), service)
     if err != nil {
       return reconcile.Result{}, err
     }
 
-    // Pod created successfully - don't requeue
-    return reconcile.Result{}, nil
+    // Service created successfully - don't requeue
   } else if err != nil {
     return reconcile.Result{}, err
   }
 
   // Pod already exists - don't requeue
-  reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+  reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", foundSvc.Namespace, "Pod.Name", foundSvc.Name)
+
+  // Define a new Pod object
+  deploy := newDeployForCR(instance)
+
+  // Set Wordpress instance as the owner and controller
+  if err = controllerutil.SetControllerReference(instance, deploy, r.scheme); err != nil {
+    return reconcile.Result{}, err
+  }
+
+  // Check if this Pod already exists
+  foundDep := &appsv1.Deployment{}
+  err = r.client.Get(context.TODO(), types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, foundDep)
+  if err != nil && errors.IsNotFound(err) {
+    reqLogger.Info("Creating a new Deployment", "Deploy.Namespace", deploy.Namespace, "Deploy.Name", deploy.Name)
+    err = r.client.Create(context.TODO(), deploy)
+    if err != nil {
+      return reconcile.Result{}, err
+    }
+
+    // Deploy created successfully - don't requeue
+    return reconcile.Result{}, nil
+  } else if err != nil {
+    return reconcile.Result{}, err
+  }
+
+  // Deploy already exists - don't requeue
+  reqLogger.Info("Skip reconcile: Deployment already exists", "Deploy.Namespace", foundDep.Namespace, "Deploy.Name", foundDep.Name)
   return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Pod {
+// newDeployForCR returns a wordpress service with the same name/namespace as the cr
+func newServiceForCR(cr *wordpressv1alpha1.Wordpress) *corev1.Service {
+  labels := map[string]string{
+    "app": cr.Name,
+  }
+
+  port := cr.Spec.Port
+
+  return &corev1.Service{
+    ObjectMeta: metav1.ObjectMeta{
+      Name:      cr.Name + "-svc",
+      Namespace: cr.Namespace,
+      Labels:    labels,
+    },
+    Spec: corev1.ServiceSpec{
+      Ports: []corev1.ServicePort{
+        {Name: "http", Port: port, Protocol: "TCP", TargetPort: intstr.FromInt(80)},
+      },
+      Selector:        labels,
+      SessionAffinity: corev1.ServiceAffinityNone,
+      Type:            corev1.ServiceTypeNodePort,
+    },
+  }
+}
+
+// newPodForCR returns a wordpress deploy with the same name/namespace as the cr
+func newDeployForCR(cr *wordpressv1alpha1.Wordpress) *appsv1.Deployment {
   labels := map[string]string{
     "app": cr.Name,
   }
 
   version := cr.Spec.Version
+  replicas := cr.Spec.Size
 
-  return &corev1.Pod{
-    ObjectMeta: metav1.ObjectMeta{
-      Name:      cr.Name + "-pod",
-      Namespace: cr.Namespace,
-      Labels:    labels,
+  return &appsv1.Deployment{
+    TypeMeta: metav1.TypeMeta{
+      APIVersion: "apps/v1",
+      Kind:       "Deployment",
     },
-    Spec: corev1.PodSpec{
-      Containers: []corev1.Container{
-        {
-          Name:  "wordpress",
-          Image: "wordpress:" + version,
-          Ports: []corev1.ContainerPort{{
-            ContainerPort: 80,
-            Name:          "wordpress-http",
-          }},
+    ObjectMeta: metav1.ObjectMeta{
+      Name:      cr.Name,
+      Namespace: cr.Namespace,
+    },
+    Spec: appsv1.DeploymentSpec{
+      Replicas: &replicas,
+      Selector: &metav1.LabelSelector{
+        MatchLabels: labels,
+      },
+      Template: corev1.PodTemplateSpec{
+        ObjectMeta: metav1.ObjectMeta{
+          Labels: labels,
+        },
+        Spec: corev1.PodSpec{
+          Containers: []corev1.Container{
+            {
+              Name:  "wordpress",
+              Image: "wordpress:" + version,
+              Ports: []corev1.ContainerPort{{
+                ContainerPort: 80,
+                Name:          "wordpress-http",
+              }},
+            },
+          },
         },
       },
     },

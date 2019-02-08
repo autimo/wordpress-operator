@@ -4,3 +4,5 @@ metadata:
   name: example-wordpress
 spec:
   version: "5"
+  port: 80
+  size: 2

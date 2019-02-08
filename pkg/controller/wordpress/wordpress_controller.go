@@ -110,8 +110,7 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  err = updateOrCreateService(r, instance, service)
-  if err != nil {
+  if err = updateOrCreateService(r, instance, service); err != nil {
     return reconcile.Result{}, err
   }
 
@@ -123,8 +122,7 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  err = updateOrCreateService(r, instance, service)
-  if err != nil {
+  if err = updateOrCreateService(r, instance, service); err != nil {
     return reconcile.Result{}, err
   }
 
@@ -136,8 +134,7 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  err = updateOrCreateDeployment(r, instance, deploy)
-  if err != nil {
+  if err = updateOrCreateDeployment(r, instance, deploy); err != nil {
     return reconcile.Result{}, err
   }
 
@@ -149,8 +146,7 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
     return reconcile.Result{}, err
   }
 
-  err = updateOrCreateDeployment(r, instance, deploy)
-  if err != nil {
+  if err = updateOrCreateDeployment(r, instance, deploy); err != nil {
     return reconcile.Result{}, err
   }
   return reconcile.Result{}, nil
@@ -158,7 +154,7 @@ func (r *ReconcileWordpress) Reconcile(request reconcile.Request) (reconcile.Res
 
 func updateOrCreateService(r *ReconcileWordpress, instance *wordpressv1alpha1.Wordpress, service *corev1.Service) error {
   reqLogger := log.WithValues("Service.Namespace", service.Namespace, "Service.Name", service.Name)
-  // Check if this Pod already exists
+  // Check if this Service already exists
   found := &corev1.Service{}
   err := r.client.Get(context.TODO(), types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, found)
   if err != nil && errors.IsNotFound(err) {
@@ -167,12 +163,9 @@ func updateOrCreateService(r *ReconcileWordpress, instance *wordpressv1alpha1.Wo
     if err != nil {
       return err
     }
-
-    // Service created successfully - don't requeue
   } else if err != nil {
     return err
   } else {
-
     // Service already exists - update
     service.ObjectMeta.ResourceVersion = found.ObjectMeta.ResourceVersion
     service.Spec.ClusterIP = found.Spec.ClusterIP
@@ -187,7 +180,6 @@ func updateOrCreateService(r *ReconcileWordpress, instance *wordpressv1alpha1.Wo
 
 func updateOrCreateDeployment(r *ReconcileWordpress, instance *wordpressv1alpha1.Wordpress, deploy *appsv1.Deployment) error {
   reqLogger := log.WithValues("Deployment.Namespace", deploy.Namespace, "Deployment.Name", deploy.Name)
-
   // Check if this Deployment already exists
   found := &appsv1.Deployment{}
   err := r.client.Get(context.TODO(), types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, found)
